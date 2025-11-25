@@ -18,13 +18,24 @@ So what? Let Wikipedia explain...
 
 In linguistics, semantic analysis is the process of relating syntactic structures, from the levels of words, phrases, clauses, sentences and paragraphs to the level of the writing as a whole, to their language-independent meanings. It also involves removing features specific to particular linguistic and cultural contexts, to the extent that such a project is possible. The elements of idiom and figurative speech, being cultural, are often also converted into relatively invariant meanings in semantic analysis. Semantics, although related to pragmatics, is distinct in that the former deals with word or sentence choice in any given context, while pragmatics considers the unique or particular meaning derived from context or tone. To reiterate in different terms, semantics is about universally coded meaning, and pragmatics, the meaning encoded in words that is then interpreted by an audience.
 
-Semantic analysis can begin with the relationship between individual words. This requires an understanding of lexical hierarchy, including hyponymy and hypernymy, meronomy, polysemy, synonyms, antonyms, and homonyms.[2] It also relates to concepts like connotation (semiotics) and collocation, which is the particular combination of words that can be or frequently are surrounding a single word. This can include idioms, metaphor, and simile, like, "white as a ghost."
+Semantic analysis can begin with the relationship between individual words. This requires an understanding of lexical hierarchy, including hyponymy and hypernymy, meronomy, polysemy, synonyms, antonyms, and homonyms. It also relates to concepts like connotation (semiotics) and collocation, which is the particular combination of words that can be or frequently are surrounding a single word. This can include idioms, metaphor and simile, like, "white as a ghost."
 
-With the availability of enough material to analyze, semantic analysis can be used to catalog and trace the style of writing of specific authors.[
+With the availability of enough material to analyze, semantic analysis can be used to catalog and trace the style of writing of specific authors.
 `;
 
-    // Explicitly define the array of modes using the strict type to fix the TS error
-    const modes: AppState['mode'][] = ['paragraph', 'sentence', 'word'];
+	// Explicitly define the array of modes using the strict type to fix the TS error
+	const modes: AppState['mode'][] = ['paragraph', 'sentence', 'word'];
+
+	// Set default mode to 'word' on load
+	import { get } from 'svelte/store';
+	if (get(appState).mode !== 'word') {
+		appState.update(state => ({ ...state, mode: 'word' }));
+	}
+
+	// Word cloud state
+	import WordCloud from '$lib/components/WordCloud.svelte';
+	let showWordCloud = false;
+	let wordCloudWords: {text: string, size: number}[] = [];
 
 	// Small filtering options exposed to the user
 	let nounOnly = true;
@@ -72,6 +83,9 @@ With the availability of enough material to analyze, semantic analysis can be us
 		$appState.text = textAreaValue;
 		$appState.data = null; // Clear previous data
 
+		// Hide word cloud if visible
+		showWordCloud = false;
+
 		// Send data to the Web Worker — include filter options for word mode
 		worker.postMessage({
 			text: $appState.text,
@@ -81,7 +95,94 @@ With the availability of enough material to analyze, semantic analysis can be us
 				minWordFreq: $appState.mode === 'word' ? minWordFreq : undefined
 			}
 		});
+}
+
+function generateWordCloud() {
+	if (!textAreaValue.trim()) return;
+	// Basic word frequency count
+	const words = textAreaValue.toLowerCase().match(/\b\w+\b/g) || [];
+	// Common English stopwords to ignore
+	const stopwords = new Set([
+		'the','and','is','to','of','in','a','an','on','for','with','as','by','at','from','it','that','this','be','or','are','was','were','but','not','which','so','if','can','has','have','had','will','would','do','does','did','about','into','than','then','them','they','their','there','these','those','its','also','such','may','more','most','some','any','all','each','other','when','what','who','whom','where','why','how','been','out','up','down','over','under','again','after','before','between','both','during','few','he','she','him','her','his','hers','i','me','my','mine','you','your','yours','we','us','our','ours'
+	]);
+	const freq: Record<string, number> = {};
+	for (const w of words) {
+		if (!stopwords.has(w)) {
+			freq[w] = (freq[w] || 0) + 1;
+		}
+	// Convert to array and sort by frequency
+	let arr = Object.entries(freq).map(([text, size]) => ({ text, size: Number(size) }));
+	arr = arr.filter(w => w.size > 1); // filter out singletons for clarity
+	arr.sort((a, b) => b.size - a.size);
+	// Scale font size between 18 and 60
+	const min = arr.length ? arr[arr.length-1].size : 1;
+	const max = arr.length ? arr[0].size : 1;
+	const scale = (n: number) => 18 + (max === min ? 0 : (n - min) * (60 - 18) / (max - min));
+	wordCloudWords = arr.map(w => ({ text: w.text, size: scale(w.size) }));
+	showWordCloud = true;
+	$appState.data = null; // Hide taxonomy if showing word cloud
+}
 	}
+// Save/Share visualisation logic
+function saveVisualisation() {
+	// Try to find the first SVG in the main area
+	const svg = document.querySelector('main svg');
+	if (!svg) return;
+
+	// Serialize SVG
+	const serializer = new XMLSerializer();
+	const svgString = serializer.serializeToString(svg);
+
+	// Create an image and draw SVG to canvas
+	const img = new window.Image();
+	const svg64 = btoa(unescape(encodeURIComponent(svgString)));
+	const imageSrc = 'data:image/svg+xml;base64,' + svg64;
+
+	// Generate filename: tinytaxonomy-yymmdd-hhmmss.png
+	const now = new Date();
+	const pad = (n: number) => n.toString().padStart(2, '0');
+	const y = now.getFullYear().toString().slice(-2);
+	const m = pad(now.getMonth() + 1);
+	const d = pad(now.getDate());
+	const h = pad(now.getHours());
+	const min = pad(now.getMinutes());
+	const s = pad(now.getSeconds());
+	const filename = `tinytaxonomy-${y}${m}${d}-${h}${min}${s}.png`;
+
+	img.onload = function() {
+		const canvas = document.createElement('canvas');
+		const svgEl = svg as SVGSVGElement;
+		canvas.width = svgEl.width?.baseVal?.value || 400;
+		canvas.height = svgEl.height?.baseVal?.value || 300;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) return;
+		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		ctx.drawImage(img, 0, 0);
+
+		canvas.toBlob(blob => {
+			if (!blob) return;
+			// Try Web Share API for PNG
+			if (navigator.canShare && navigator.canShare({ files: [new File([blob], filename, { type: 'image/png' })] })) {
+				const file = new File([blob], filename, { type: 'image/png' });
+				navigator.share({
+					title: 'TinyTaxonomy Visualisation',
+					text: 'Check out this visualisation from TinyTaxonomy!',
+					files: [file]
+				});
+				return;
+			}
+			// Otherwise, trigger PNG download
+			const a = document.createElement('a');
+			a.href = URL.createObjectURL(blob);
+			a.download = filename;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(a.href);
+		}, 'image/png');
+	};
+	img.src = imageSrc;
+}
 </script>
 
 <div class="flex h-screen w-full bg-gray-100 font-sans">
@@ -148,22 +249,31 @@ With the availability of enough material to analyze, semantic analysis can be us
 				</div>
 			{/if}
 
-			<!-- Process Button (Error source is here) -->
-			<button 
-				on:click={runAnalysis}
-				disabled={$appState.isProcessing || !textAreaValue.trim() || wordCount > maxWordLimit}
-				class="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-bold rounded-lg shadow transition-colors flex justify-center items-center gap-2"
-			>
-				{#if $appState.isProcessing}
-					<svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-					</svg>
-					Processing...
-				{:else}
-					Generate Taxonomy
-				{/if}
-			</button>
+				<!-- Process Button (Error source is here) -->
+				<button 
+					on:click={runAnalysis}
+					disabled={$appState.isProcessing || !textAreaValue.trim() || wordCount > maxWordLimit}
+					class="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-bold rounded-lg shadow transition-colors flex justify-center items-center gap-2"
+				>
+					{#if $appState.isProcessing}
+						<svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+							<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+							<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+						</svg>
+						Processing...
+					{:else}
+						Generate Taxonomy
+					{/if}
+				</button>
+
+				<!-- Word Cloud Button -->
+				<button
+					on:click={generateWordCloud}
+					disabled={!textAreaValue.trim() || wordCount > maxWordLimit}
+					class="w-full py-3 mt-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white font-bold rounded-lg shadow transition-colors flex justify-center items-center gap-2"
+				>
+					Just give me a word cloud
+				</button>
 
 			<!-- Error Display -->
 			{#if $appState.error}
@@ -181,24 +291,34 @@ With the availability of enough material to analyze, semantic analysis can be us
 		</div>
 	</aside>
 
-	<!-- Main Canvas -->
-	<main class="flex-1 p-4 relative overflow-hidden">
-		{#if $appState.data}
-			<div class="flex items-center gap-3 mb-2">
-				<div class="text-xs text-gray-500">Layout:</div>
-				<select bind:value={layoutType} class="text-sm p-1 border rounded">
-					<option value="tree">Tree (left-right)</option>
-					<option value="radial">Radial</option>
-				</select>
-				<div class="text-xs text-gray-500 ml-4">Show levels:</div>
-				<input type="number" min="1" bind:value={maxVisibleLevels} class="w-16 p-1 border rounded text-sm" />
-			</div>
-			<TaxonomyTree data={$appState.data} layout={layoutType} maxDepth={maxVisibleLevels} />
-		{:else}
-			<div class="w-full h-full border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center text-gray-400">
-				<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m-4 4h8M5 16h14M8 10l-4 6h12l-4-6M12 3c-1.105 0-2 .895-2 2s.895 2 2 2 2-.895 2-2-.895-2-2-2z"/></svg>
-				<p class="mt-4">Enter text and click generate to visualize the semantic structure.</p>
-			</div>
-		{/if}
-	</main>
+	   <!-- Main Canvas -->
+	   <main class="flex-1 p-4 relative overflow-hidden">
+		   {#if showWordCloud}
+			   <div class="flex flex-col items-center justify-center w-full h-full">
+				   <div class="flex items-center gap-3 mb-2 w-full">
+					   <div class="flex-1"></div>
+					   <button class="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded shadow text-sm" on:click={saveVisualisation}>Save / Share</button>
+				   </div>
+				   <WordCloud words={wordCloudWords} />
+			   </div>
+		   {:else if $appState.data}
+			   <div class="flex items-center gap-3 mb-2">
+				   <div class="text-xs text-gray-500">Layout:</div>
+				   <select bind:value={layoutType} class="text-sm p-1 border rounded">
+					   <option value="tree">Tree (left-right)</option>
+					   <option value="radial">Radial</option>
+				   </select>
+				   <div class="text-xs text-gray-500 ml-4">Show levels:</div>
+				   <input type="number" min="1" bind:value={maxVisibleLevels} class="w-16 p-1 border rounded text-sm" />
+				   <button class="ml-auto px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded shadow text-sm" on:click={saveVisualisation}>Save / Share</button>
+			   </div>
+			   <TaxonomyTree data={$appState.data} layout={layoutType} maxDepth={maxVisibleLevels} />
+		   {:else}
+			   <div class="w-full h-full border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center text-gray-400">
+				   <svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m-4 4h8M5 16h14M8 10l-4 6h12l-4-6M12 3c-1.105 0-2 .895-2 2s.895 2 2 2 2-.895 2-2-.895-2-2-2z"/></svg>
+				   <p class="mt-4">Enter text and click generate to visualize the semantic structure.</p>
+			   </div>
+		   {/if}
+	   </main>
 </div>
+

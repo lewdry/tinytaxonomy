@@ -3,6 +3,9 @@ import { defineConfig } from 'vite';
 import { fileURLToPath } from 'url';
 
 export default defineConfig({
+    // Ensure Vite uses correct base path when deployed to GitHub Pages
+    // this keeps worker and chunk URLs consistent with SvelteKit's `paths.base`.
+    base: process.env.NODE_ENV === 'production' ? '/tinytaxonomy/' : '/',
 	plugins: [sveltekit()],
     // Configure worker to use standard ES modules for browser compatibility
     worker: {

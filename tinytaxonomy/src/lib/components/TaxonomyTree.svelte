@@ -25,8 +25,8 @@
 		const root = d3.hierarchy(hierarchyData);
         
         // Dynamic height adjustment based on number of leaves for better vertical spacing
-        const leaves = root.leaves().length;
-        const dynamicHeight = Math.max(height, leaves * 25); 
+		const leaves = root.leaves().length;
+		const dynamicHeight = Math.max(height, leaves * 25);
 
 		// Define the tree layout
 		const treeLayout = d3.tree().size([dynamicHeight, width - 200]); 
@@ -35,12 +35,27 @@
         // Container group for the tree, offset to the right
 		const g = svg.append('g').attr('transform', 'translate(100,0)');
 
-        // Links (Paths between nodes)
+		// Compute color scale for cluster height if available
+		const internalNodes = root.descendants().filter((d: any) => d.children && Array.isArray(d.children));
+		const heights = internalNodes.map((d: any) => d.data?.height).filter((h: any) => typeof h === 'number');
+		const heightMin = heights.length ? Math.min(...heights) : 0;
+		const heightMax = heights.length ? Math.max(...heights) : 1;
+		const colorScale = heights.length
+			? d3.scaleLinear<string>().domain([heightMin, heightMax]).range(['#fee5d9', '#a50f15'])
+			: null;
+
+		// Links (Paths between nodes)
 		g.selectAll('.link')
 			.data(root.links())
 			.enter()
 			.append('path')
 			.attr('class', 'link fill-none stroke-gray-300 stroke-[1.5px] opacity-70')
+			// color links by the parent node's height when available
+			.attr('stroke', (d: any) => {
+				const parent = d.source?.data;
+				if (parent && parent.height != null && colorScale) return colorScale(parent.height as number);
+				return '#d1d5db'; // default gray-300
+			})
 			.attr('d', d3.linkHorizontal()
 				.x((d: any) => d.y)
 				.y((d: any) => d.x) as any
@@ -56,8 +71,14 @@
 
 		// Node Circles
 		node.append('circle')
-			.attr('r', (d) => d.children ? 5 : 4) // Internal nodes slightly bigger
-			.attr('class', (d) => d.children ? 'fill-gray-500 hover:fill-gray-700' : 'fill-blue-600 hover:fill-blue-700 cursor-pointer');
+			.attr('r', (d) => d.children ? 6 : 4) // Internal nodes slightly bigger
+			.attr('class', (d) => d.children ? 'hover:fill-gray-700 cursor-default' : 'cursor-pointer')
+			.attr('fill', (d: any) => {
+				// Leaves remain blue; internal nodes get color by height
+				if (!d.children) return '#2563eb'; // blue-600
+				if (d.data && typeof d.data.height === 'number' && colorScale) return colorScale(d.data.height);
+				return '#6b7280'; // gray-500 fallback
+			});
 
 		// Node Labels (Text)
 		node.append('text')
@@ -66,9 +87,34 @@
 			.style('text-anchor', (d) => d.children ? 'end' : 'start')
 			.text((d: any) => d.data.name)
             .attr('class', 'text-xs font-mono fill-gray-700')
-            // Tooltip on hover showing the full text
-            .append('title')
-            .text((d: any) => d.data.fullText || `Cluster (${d.descendants().length - 1} items)`);
+			// Tooltip on hover showing a clean, helpful cluster summary
+			.append('title')
+			.text((d: any) => {
+				// For leaves: show the full text
+				if (!d.children) return d.data.fullText || d.data.name || 'leaf';
+
+				// For clusters: show precise size and sample members
+				const size = d.leaves().length;
+				const sample = d.data?.sampleLeaves ?? d.leaves().map((l: any) => l.data?.fullText ?? l.data?.name ?? '').slice(0, 5);
+				const sampleText = (sample && sample.length) ? sample.map((s: string) => s.length > 120 ? s.substring(0, 120) + '...' : s).join('\n- ') : 'no preview available';
+
+				const height = d.data?.height ?? 'N/A';
+				const header = `Cluster (${size} items) • H: ${typeof height === 'number' ? height.toFixed(2) : height}`;
+				return header + (sampleText ? '\n\nTop members:\n- ' + sampleText : '');
+			});
+
+		// Add a small legend showing color mapping and help text
+		const legendPadding = 10;
+		const legend = svg.append('g').attr('class', 'taxonomy-legend').attr('transform', `translate(${20}, ${height - 80})`);
+
+		// Background
+		legend.append('rect').attr('x', -legendPadding).attr('y', -legendPadding).attr('width', 300).attr('height', 70).attr('rx', 8).attr('class', 'fill-white stroke-gray-200');
+
+		// Legend content
+		legend.append('text').attr('x', 10).attr('y', 8).attr('class', 'text-xs fill-gray-500').text('Legend:');
+		legend.append('text').attr('x', 10).attr('y', 24).attr('class', 'text-xs fill-gray-400').text('• Leaf = original item (sentence/word)');
+		legend.append('text').attr('x', 10).attr('y', 40).attr('class', 'text-xs fill-gray-400').text('• Cluster = merged group; tooltip shows size & sample members');
+		legend.append('text').attr('x', 10).attr('y', 56).attr('class', 'text-xs fill-gray-400').text('• Color (darker) indicates larger merge distance (H)');
 
         // Add Zoom/Pan Behavior
         const zoom = d3.zoom()

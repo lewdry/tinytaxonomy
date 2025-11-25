@@ -1,44 +1,45 @@
-Project Blueprint: Tiny Taxonomy
-1. Executive Summary
-Tiyn Taxonomy is a client-side, static web application designed for the Information & Library Science (ILS) community. It analyzes raw text input and generates an interactive hierarchical visualization (taxonomy) to reveal the semantic structure of the document.
-Unlike word clouds which show frequency, this tool uses hierarchical clustering to show relationships, grouping similar concepts, sentences, or sections together.
-Key Constraints:
+# TinyTaxonomy
 
-Zero Backend: All processing must happen in the user's browser (Privacy & Cost).
-Static Hosting: Must be deployable to GitHub Pages or Cloudflare Pages.
-Reactive UI: Built with Svelte/SvelteKit.
-2. Technical Stack
-ComponentTechnologyReasoningFrameworkSvelteKitHigh performance, small bundle size, built-in state management.Deployment@sveltejs/adapter-staticCompiles app to static HTML/JS for serverless hosting.NLPwink-nlpLightweight, browser-native NLP (better than natural for client-side).Math/MLml-matrix, ml-hclustEfficient matrix operations and clustering algorithms in JS.VisualizationD3.js (d3-hierarchy)The industry standard for rendering complex trees and dendrograms.StylesTailwind CSSRapid UI development.ConcurrencyWeb WorkersCRITICAL. Offloads heavy math to a background thread to prevent UI freezing.
+TinyTaxonomy is a privacy-first, client-side, static web app for exploring the semantic structure of text. It turns raw text into an interactive hierarchical visualization (a taxonomy/dendrogram) using client-side NLP and hierarchical clustering, all without needing a backend.
+
+Highlights
+- Browser-only processing (no backend required) — good for privacy and cost savings
+- Interactive hierarchical visualizations (zoom/pan/collapse, tooltips)
+- Built with SvelteKit, D3, Web Workers and lightweight NLP & clustering libraries
+
+## Tech stack
+- Framework: SvelteKit
+- Styling: Tailwind CSS
+- NLP: wink-nlp (lightweight browser-friendly models)
+- Math / Clustering: ml-hclust (+ supporting matrix utilities)
+- Visualization: D3 (hierarchies / dendrograms)
+- Worker model: Web Workers to perform expensive calculations off the main thread
+
 Export to Sheets
-3. Functional Requirements
-3.1. User Interface
-Input Area: A large text area for pasting raw text (support for 500–5,000 words).
-Mode Toggle: A control to switch the "Atomic Unit" of analysis:
-Sections (Paragraphs): Clusters blocks of text (Table of Contents view).
-Statements (Sentences): Clusters specific claims (Argument mapping).
-Keywords (Words): Clusters vocabulary (Thesaurus/Ontology generation).
-Visualization Canvas: An interactive SVGs area.
-Zoomable and Pannable.
-Collapsible nodes (click to expand/hide branches).
-Tooltip on hover showing the full text of the node.
+## What it does
+1. Parse and clean text (paragraph/sentence/word modes)
+2. Convert segments into TF-IDF vectors
+3. Compute pairwise distances (cosine distance)
+4. Run agglomerative hierarchical clustering
+5. Render an interactive, collapsible taxonomy tree using D3
+
+Key user features
+- Paste or load text input
+- Choose analysis mode: paragraph, sentence, or keyword (word) view
+- Interactive tree: zoom, pan, collapse branches, tooltips for full text
+- All heavy work runs inside a Web Worker for a responsive UI
 3.2. Analysis Logic (The Pipeline)
 The application acts as a pipeline that transforms Text → Vectors → Distance Matrix → Tree.
-4. Architecture & Data Flow
+## Architecture & data flow
 4.1. Directory Structure
 Plaintext
 
 src/
 ├── lib/
-│ ├── components/
-│ │ ├── TaxonomyTree.svelte (D3 Visualization)
-│ │ ├── InputPanel.svelte (Text area & Toggles)
-│ │ └── Controls.svelte (Threshold sliders)
-│ ├── workers/
-│ │ └── cluster.worker.ts (The "Brain" - NLP & Math)
-│ └── stores/
-│ └── appState.ts (Manages data flow)
-├── routes/
-│ └── +page.svelte (Main layout)
+│ ├── components/        # Svelte components (TaxonomyTree.svelte, controls, inputs)
+│ ├── workers/           # Web Worker(s) for clustering & vector calculations
+│ └── stores/            # App state and stores
+├── routes/              # SvelteKit routes
 └── app.html
 4.2. The Web Worker Pipeline (cluster.worker.ts)
 The worker listens for a message: { text: string, mode: 'word'|'sentence'|'paragraph' }.
@@ -81,7 +82,17 @@ JSON
 { "name": "Leaf Node (The Sentence or Word)", "value": 1 }
 ]
 }
-5. Implementation Details (Key Code Snippets)
+## Implementation details (high level)
+
+The main pipeline implemented in a worker is:
+
+- Tokenize & clean segments (wink-nlp)
+- Build vocabulary and TF-IDF vectors
+- Compute distance matrix (1 - cosine similarity)
+- Run hierarchical clustering (ml-hclust)
+- Convert the linkage to a D3-compatible hierarchy and render
+
+See `src/lib/workers/cluster.worker.ts` for the current worker implementation.
 5.1. Handling TF-IDF (Client-Side)
 Since we don't have Python's scikit-learn, we implement a lightweight vectorizer.
 TypeScript
@@ -131,16 +142,34 @@ update(newData); // Re-render when data prop changes
 }
 };
 }
-6. Risks & Mitigations
-RiskMitigation StrategyPerformance: Calculating N2
- distance matrix on large text will freeze the browser.1. Strict input limit (e.g., max 500 segments). 
+## Performance & practical limits
+Processing and clustering are O(N^2) in the number of input segments (distance matrix). The app uses these mitigations:
 
-2. Web Workers (Mandatory). 
-
-3. Progress bar in UI during calculation.
+- Limit the number of segments for client processing (e.g., use sampling or truncation)
+- Offload expensive computation to Web Workers
+- Display progress and allow cancellation
 Visualization Clutter: Tree becomes unreadable with long sentences as nodes.Truncate labels in the tree (e.g., "The quick brown fox...") but show full text in a Tooltip or side panel on hover.Cluster Naming: The algorithm groups items but doesn't name the group.Implement a "Representative Keyword" extractor. For every branch, find the top 3 high TF-IDF words and use them as the branch label.
 Export to Sheets
-7. Development Roadmap
+## Getting started
+This repository contains the TinyTaxonomy app. The working SvelteKit app lives under the `tinytaxonomy/` folder.
+
+Quick start (app directory: `tinytaxonomy`)
+
+```bash
+# from the repository root
+cd tinytaxonomy/tinytaxonomy
+npm install
+npm run dev
+```
+
+Common scripts
+
+- `npm run dev` — start the dev server (Vite)
+- `npm run build` — build a production bundle
+- `npm run preview` — locally preview the production build
+- `npm run check` — run TypeScript / svelte-check
+- `npm run lint` — run Prettier + ESLint checks
+- `npm run format` — auto-format the codebase
 Phase 1: Skeleton (Day 1-2)
 Set up SvelteKit + Tailwind.
 Set up the Web Worker boilerplate.
@@ -152,10 +181,24 @@ Verify logic by checking if similar sentences actually group together in the con
 Phase 3: Visualization (Day 5-6)
 Build the TaxonomyTree.svelte component.
 Connect the Worker output to the D3 render.
-Phase 4: Polish (Day 7)
-Add the "Word/Sentence/Paragraph" toggle logic.
-Add Zoom/Pan support.
-Deploy to GitHub Pages.
-📝 Note for the Developer
-Testing: Use the "Lorem Ipsum" generator for performance testing, but use distinct wikipedia articles (e.g., one paragraph on Cats, one on Cars) to test the accuracy of the clustering.
-Wink-NLP: Ensure you load the model correctly. It requires an async load step winkNLP(model).
+## Contributing
+Contributions are welcome! If you'd like to help:
+
+1. Open an issue to discuss feature ideas or bugs
+2. Create a branch: `git checkout -b feat/your-feature`
+3. Add tests / lint + format your code
+4. Open a PR when ready
+
+## License
+
+This project is licensed under the MIT License — see the `LICENSE` file for details.
+
+Copyright (c) 2025 Lewis Dryburgh
+
+Tips
+- Keep heavy processing out of the main thread (use a Worker)
+- Add small sample text inputs for reproducible testing
+## Where to look next
+- Worker: `src/lib/workers/cluster.worker.ts`
+- Main visualization component: `src/lib/components/TaxonomyTree.svelte`
+- App state: `src/lib/stores/appState.ts`

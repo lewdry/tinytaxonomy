@@ -43,6 +43,16 @@ src/
 └── app.html
 4.2. The Web Worker Pipeline (cluster.worker.ts)
 The worker listens for a message: { text: string, mode: 'word'|'sentence'|'paragraph' }.
+
+The worker also accepts an optional `options` object in its message (useful for pre-filtering in word mode):
+
+```js
+// noun-only + min frequency (word mode)
+worker.postMessage({ text, mode: 'word', options: { nounOnly: true, minWordFreq: 2 } });
+
+// future: minTfIdf for sentence/paragraph filtering (placeholder)
+worker.postMessage({ text, mode: 'sentence', options: { minTfIdf: 0.12 } });
+```
 Step 1: Segmentation & Cleaning
 Use wink-nlp to parse the doc.
 
@@ -93,6 +103,24 @@ The main pipeline implemented in a worker is:
 - Convert the linkage to a D3-compatible hierarchy and render
 
 See `src/lib/workers/cluster.worker.ts` for the current worker implementation.
+
+### Recent visualization & UX improvements
+
+The app now includes the following quality-of-life and readability improvements (implemented in the UI + worker):
+
+- Consistent branch colors: top-level branches are mapped to distinct categorical colours so related items keep the same colour across the graph.
+- Cluster labels: internal cluster nodes now expose a short human-friendly label (top 2–3 representative keywords) instead of a generic "Cluster (H:...)" name. Tooltips still show example members.
+- Shapes for node types: leaves use small circles; clusters use a diamond glyph so clusters immediately stand out.
+- Collapsible branches: double-click a cluster (diamond) to fold/unfold that branch and reduce visual clutter.
+- Distance indicators: internal nodes show a small horizontal bar that visualizes merge distance (H) and links vary slightly in stroke width by merge strength.
+- Radial layout: a radial dendrogram option (Layout dropdown) lets you arrange the taxonomy in rings from the root → leaves, which reduces cross-overs and better preserves semantic grouping.
+- Noise reduction controls: the UI exposes a "noun-only" toggle and a minimum token frequency filter in word mode so stopwords, function words and rare tokens can be hidden before clustering.
+
+Default behavior and input limits
+- The default Min Token Frequency in the UI is now 1 (so very-low-frequency tokens are kept by default). You can raise this to remove noise during word-mode clustering.
+- Input safety: to prevent slow or runaway client processing the UI enforces a 5,000-word limit. If your input exceeds this the app will show an error and refuse to start processing — split large text into smaller parts or summarize first.
+
+These changes are aimed at shifting the visualization away from a sea of unlabeled dots into a readable, explorable taxonomy with meaningful labels and interaction.
 5.1. Handling TF-IDF (Client-Side)
 Since we don't have Python's scikit-learn, we implement a lightweight vectorizer.
 TypeScript

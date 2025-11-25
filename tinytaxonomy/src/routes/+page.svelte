@@ -13,6 +13,21 @@
     // Explicitly define the array of modes using the strict type to fix the TS error
     const modes: AppState['mode'][] = ['paragraph', 'sentence', 'word'];
 
+	// Small filtering options exposed to the user
+	let nounOnly = true;
+	let minWordFreq = 1; // default to 1 — keep rare tokens by default
+
+	// Input limits
+	const maxWordLimit = 5000; // prevent runaway processing
+
+	// reactive word count for the textarea
+	let wordCount = 0;
+	$: wordCount = textAreaValue.split(/\s+/).filter(w => w.length > 0).length;
+	// layout & levels controls for visualization
+	// Default to radial layout — radial better preserves semantic grouping and reduces cross-overs
+	let layoutType: 'tree' | 'radial' = 'radial';
+	let maxVisibleLevels: number = 3;
+
 	onMount(() => {
 		// Initialize the worker
 		worker = new ClusterWorker();
@@ -31,16 +46,27 @@
 
 	function runAnalysis() {
 		if (!textAreaValue.trim()) return;
-		
-		$appState.isProcessing = true;
-		$appState.error = null;
-		$appState.text = textAreaValue;
-        $appState.data = null; // Clear previous data
 
-		// Send data to the Web Worker
+		const wordCount = textAreaValue.split(/\s+/).filter(w => w.length > 0).length;
+		if (wordCount > maxWordLimit) {
+			$appState.error = `Input too large — ${wordCount} words (limit ${maxWordLimit}). Reduce input or split into parts.`;
+			$appState.isProcessing = false;
+			return;
+		}
+
+		$appState.error = null;
+		$appState.isProcessing = true;
+		$appState.text = textAreaValue;
+		$appState.data = null; // Clear previous data
+
+		// Send data to the Web Worker — include filter options for word mode
 		worker.postMessage({
 			text: $appState.text,
-			mode: $appState.mode
+			mode: $appState.mode,
+			options: {
+				nounOnly: $appState.mode === 'word' ? nounOnly : false,
+				minWordFreq: $appState.mode === 'word' ? minWordFreq : undefined
+			}
 		});
 	}
 </script>
@@ -64,7 +90,10 @@
 					placeholder="Paste your text here (500-5000 words)..."
 				></textarea>
 				<div class="text-xs text-right text-gray-400">
-					Word Count: {textAreaValue.split(/\s+/).filter(w => w.length > 0).length}
+					Word Count: {wordCount}
+					{#if wordCount > maxWordLimit}
+						<span class="ml-2 text-red-500 font-semibold">Exceeded max words ({maxWordLimit}) — reduce input</span>
+					{/if}
 				</div>
 			</div>
 
@@ -92,10 +121,24 @@
 				</p>
 			</div>
 
+			{#if $appState.mode === 'word'}
+				<div class="mt-2 p-3 rounded-md bg-gray-50 border">
+					<div class="flex items-center gap-3 text-xs">
+						<input type="checkbox" id="nounOnly" bind:checked={nounOnly} class="w-4 h-4" />
+						<label for="nounOnly">Keep nouns only (POS filter)</label>
+					</div>
+					<div class="flex items-center gap-3 mt-2 text-xs">
+                		<label class="text-xs" for="minWordFreq">Min token frequency:</label>
+                		<input id="minWordFreq" type="number" min="1" bind:value={minWordFreq} class="w-16 p-1 border rounded text-sm" />
+						<span class="text-gray-400">(hide very rare tokens)</span>
+					</div>
+				</div>
+			{/if}
+
 			<!-- Process Button (Error source is here) -->
 			<button 
 				on:click={runAnalysis}
-				disabled={$appState.isProcessing || !textAreaValue.trim()}
+				disabled={$appState.isProcessing || !textAreaValue.trim() || wordCount > maxWordLimit}
 				class="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-bold rounded-lg shadow transition-colors flex justify-center items-center gap-2"
 			>
 				{#if $appState.isProcessing}
@@ -128,7 +171,16 @@
 	<!-- Main Canvas -->
 	<main class="flex-1 p-4 relative overflow-hidden">
 		{#if $appState.data}
-			<TaxonomyTree data={$appState.data} />
+			<div class="flex items-center gap-3 mb-2">
+				<div class="text-xs text-gray-500">Layout:</div>
+				<select bind:value={layoutType} class="text-sm p-1 border rounded">
+					<option value="tree">Tree (left-right)</option>
+					<option value="radial">Radial</option>
+				</select>
+				<div class="text-xs text-gray-500 ml-4">Show levels:</div>
+				<input type="number" min="1" bind:value={maxVisibleLevels} class="w-16 p-1 border rounded text-sm" />
+			</div>
+			<TaxonomyTree data={$appState.data} layout={layoutType} maxDepth={maxVisibleLevels} />
 		{:else}
 			<div class="w-full h-full border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center text-gray-400">
 				<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m-4 4h8M5 16h14M8 10l-4 6h12l-4-6M12 3c-1.105 0-2 .895-2 2s.895 2 2 2 2-.895 2-2-.895-2-2-2z"/></svg>

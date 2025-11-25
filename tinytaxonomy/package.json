@@ -41,6 +41,7 @@
   "type": "module",
   "dependencies": {
     "ml-hclust": "^1.1.0",
+    "textrank": "^1.0.5",
     "util": "^0.12.5",
     "wink-eng-lite-web-model": "^1.8.1",
     "wink-nlp": "^2.4.0"

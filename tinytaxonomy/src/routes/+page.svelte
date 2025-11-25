@@ -8,7 +8,20 @@
 	let worker: Worker;
 	
     // Placeholder text to get the user started
-	let textAreaValue = "TinyTaxonomy is a client-side, static web app built to model text quickly.\n\nIt analyzes raw text input and generates an interactive hierarchical visualization (taxonomy) to reveal the semantic structure of the document.\n\nUnlike word clouds which show frequency, this tool uses hierarchical clustering to show relationships, grouping similar concepts, sentences or sections together.";
+	let textAreaValue = `TinyTaxonomy is a client-side, static web app built to model text quickly.
+
+It analyzes raw text input and generates an interactive hierarchical visualisation (taxonomy) to reveal the semantic structure of the document.
+
+Unlike word clouds which show frequency, this tool uses hierarchical clustering to show relationships, grouping similar concepts, sentences or sections together.
+
+So what? Let Wikipedia explain...
+
+In linguistics, semantic analysis is the process of relating syntactic structures, from the levels of words, phrases, clauses, sentences and paragraphs to the level of the writing as a whole, to their language-independent meanings. It also involves removing features specific to particular linguistic and cultural contexts, to the extent that such a project is possible. The elements of idiom and figurative speech, being cultural, are often also converted into relatively invariant meanings in semantic analysis. Semantics, although related to pragmatics, is distinct in that the former deals with word or sentence choice in any given context, while pragmatics considers the unique or particular meaning derived from context or tone. To reiterate in different terms, semantics is about universally coded meaning, and pragmatics, the meaning encoded in words that is then interpreted by an audience.
+
+Semantic analysis can begin with the relationship between individual words. This requires an understanding of lexical hierarchy, including hyponymy and hypernymy, meronomy, polysemy, synonyms, antonyms, and homonyms.[2] It also relates to concepts like connotation (semiotics) and collocation, which is the particular combination of words that can be or frequently are surrounding a single word. This can include idioms, metaphor, and simile, like, "white as a ghost."
+
+With the availability of enough material to analyze, semantic analysis can be used to catalog and trace the style of writing of specific authors.[
+`;
 
     // Explicitly define the array of modes using the strict type to fix the TS error
     const modes: AppState['mode'][] = ['paragraph', 'sentence', 'word'];
@@ -76,7 +89,7 @@
 	<aside class="w-1/3 min-w-[350px] max-w-[500px] flex flex-col bg-white shadow-xl z-10">
 		<div class="p-6 border-b">
 			<h1 class="text-2xl font-bold text-gray-800">TinyTaxonomy</h1>
-			<p class="text-sm text-gray-500">Client-Side Semantic Structure Analyzer</p>
+			<p class="text-sm text-gray-500">An 'Aboutness Visualiser' (or Semantic Structure Analyzer)</p>
 		</div>
 
 		<div class="flex-1 p-6 flex flex-col gap-6 overflow-y-auto">

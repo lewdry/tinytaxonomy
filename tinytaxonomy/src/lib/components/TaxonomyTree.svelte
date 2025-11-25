@@ -38,8 +38,9 @@ export let maxDepth: number = Infinity;
 			workingData = hierarchyData;
 		}
 
-		function prune(node: any, depth = 0) {
-			if (!node || !node.children) return;
+		function prune(node: any, depth = 0, parent: any = null, index: number = -1) {
+			if (!node) return;
+			if (!node.children) return;
 			// if this node has an id and it's collapsed, remove children
 			if (node.id && collapsed.has(node.id)) {
 				node._children = node.children;
@@ -52,7 +53,19 @@ export let maxDepth: number = Infinity;
 				node.children = null;
 				return;
 			}
-			for (const c of node.children ?? []) prune(c);
+			// Prune children recursively
+			if (Array.isArray(node.children)) {
+				for (let i = node.children.length - 1; i >= 0; i--) {
+					prune(node.children[i], depth + 1, node, i);
+				}
+				// After recursion, filter out all empty clusters from children
+				node.children = node.children.filter((child: any) => {
+					const isCluster = child.type === 'cluster' || child.clusterLabel || child.label === 'cluster';
+					return !(isCluster && (!child.children || child.children.length === 0));
+				});
+				// If children array is now empty, set to null for consistency
+				if (node.children.length === 0) node.children = null;
+			}
 		}
 
 		prune(workingData);
@@ -362,20 +375,30 @@ export let maxDepth: number = Infinity;
 				});
 			});
 
-			const infoY = swatchStartY + rows * 22 + 8;
-			content.append('text').attr('x', 10).attr('y', infoY + 12).attr('class', 'text-xs fill-gray-400').text('• Leaf = original item (circle)');
-			content.append('text').attr('x', 10).attr('y', infoY + 32).attr('class', 'text-xs fill-gray-400').text('• Color = semantic topic family (branches share a color)');
-			content.append('text').attr('x', 10).attr('y', infoY + 32).attr('class', 'text-xs fill-gray-400').text('• Cluster = merged group (diamond); label = learned concept (TextRank); tooltip shows examples');
+			const infoY = swatchStartY + rows * 24 + 8;
+			let legendLineY = infoY + 16;
+			content.append('text').attr('x', 10).attr('y', legendLineY).attr('class', 'text-xs fill-gray-400').text('• Leaf = original item (circle)');
+			legendLineY += 24;
+			content.append('text').attr('x', 10).attr('y', legendLineY).attr('class', 'text-xs fill-gray-400').text('• Color = semantic topic family (branches share a color)');
+			legendLineY += 24;
+			content.append('text').attr('x', 10).attr('y', legendLineY).attr('class', 'text-xs fill-gray-400').text('• Cluster = merged group (diamond); label = learned concept (TextRank); tooltip shows examples');
+			legendLineY += 24;
 			// Explain the meaning and mapping: bar width indicates distance and bigger distance = weaker relationship
-			content.append('text').attr('x', 10).attr('y', infoY + 52).attr('class', 'text-xs fill-gray-400').text('• Bar width = merge distance (H); distance ↑ = weaker relationship');
-			content.append('text').attr('x', 10).attr('y', infoY + 72).attr('class', 'text-xs fill-gray-400').text('• Double-click a diamond to collapse/expand that branch');
+			content.append('text').attr('x', 10).attr('y', legendLineY).attr('class', 'text-xs fill-gray-400').text('• Bar width = merge distance (H); distance ↑ = weaker relationship');
+			legendLineY += 24;
+			content.append('text').attr('x', 10).attr('y', legendLineY).attr('class', 'text-xs fill-gray-400').text('• Double-click a diamond to collapse/expand that branch');
 		} else {
-			// fallback mono legend — draw same explanatory text into content group
-			content.append('text').attr('x', 10).attr('y', 36).attr('class', 'text-xs fill-gray-400').text('• Leaf = original item (circle)');
-			content.append('text').attr('x', 10).attr('y', 56).attr('class', 'text-xs fill-gray-400').text('• Color = semantic topic family (branches share a color)');
-			content.append('text').attr('x', 10).attr('y', 56).attr('class', 'text-xs fill-gray-400').text('• Cluster = merged group (diamond); label = learned concept (TextRank); tooltip shows examples');
-			content.append('text').attr('x', 10).attr('y', 76).attr('class', 'text-xs fill-gray-400').text('• Bar width = merge distance (H); distance ↑ = weaker relationship');
-			content.append('text').attr('x', 10).attr('y', 96).attr('class', 'text-xs fill-gray-400').text('• Double-click a diamond to collapse/expand that branch');
+			// fallback mono legend — draw same explanatory text into content group with more spacing
+			let legendLineY = 36;
+			content.append('text').attr('x', 10).attr('y', legendLineY).attr('class', 'text-xs fill-gray-400').text('• Leaf = original item (circle)');
+			legendLineY += 24;
+			content.append('text').attr('x', 10).attr('y', legendLineY).attr('class', 'text-xs fill-gray-400').text('• Color = semantic topic family (branches share a color)');
+			legendLineY += 24;
+			content.append('text').attr('x', 10).attr('y', legendLineY).attr('class', 'text-xs fill-gray-400').text('• Cluster = merged group (diamond); label = learned concept (TextRank); tooltip shows examples');
+			legendLineY += 24;
+			content.append('text').attr('x', 10).attr('y', legendLineY).attr('class', 'text-xs fill-gray-400').text('• Bar width = merge distance (H); distance ↑ = weaker relationship');
+			legendLineY += 24;
+			content.append('text').attr('x', 10).attr('y', legendLineY).attr('class', 'text-xs fill-gray-400').text('• Double-click a diamond to collapse/expand that branch');
 		}
 
 		// measure content and add a background rect sized to the content to avoid overflowing
@@ -385,7 +408,7 @@ export let maxDepth: number = Infinity;
 			const bgX = bbox.x - legendPadding;
 			const bgY = bbox.y - legendPadding;
 			const bgW = Math.max(240, bbox.width + legendPadding * 2);
-			const bgH = bbox.height + legendPadding * 2;
+			const bgH = Math.max(200, bbox.height + legendPadding * 2); // increase min height
 			// insert the background rect under the content
 			legend.insert('rect', ':first-child')
 				.attr('x', bgX)
@@ -402,7 +425,7 @@ export let maxDepth: number = Infinity;
 				.attr('x', -legendPadding)
 				.attr('y', -legendPadding)
 				.attr('width', 420)
-				.attr('height', 160)
+				.attr('height', 200)
 				.attr('rx', 8)
 				.attr('class', 'fill-white stroke-gray-200')
 				.style('cursor', 'move');

@@ -21,28 +21,31 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          path: ./tinytaxonomy
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: 'npm'
-          
+          cache-dependency-path: ./tinytaxonomy/package-lock.json
+
       - name: Install dependencies
         run: npm install
+        working-directory: ./tinytaxonomy
 
       - name: Build SvelteKit App
-        # Set the environment variable for production build path
         run: NODE_ENV=production npm run build
-      
+        working-directory: ./tinytaxonomy
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
-        
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # The 'build' folder is where SvelteKit's static adapter output is placed
-          path: './build'
+          path: ./tinytaxonomy/build
 
   deploy:
     environment:

@@ -1,16 +1,42 @@
-export function calculateTfIdfVector(tokens: string[], allDocs: string[][], vocab: string[]): number[] {
+export interface TfIdfOptions {
+    tokenWeights?: Map<string, number>;  // Custom weights per term
+    normalizeVector?: boolean;           // L2 normalize the result
+}
+
+export function calculateTfIdfVector(
+    tokens: string[], 
+    allDocs: string[][], 
+    vocab: string[],
+    options: TfIdfOptions = {}
+): number[] {
+    const { tokenWeights, normalizeVector = false } = options;
     const N = allDocs.length;
     if (tokens.length === 0) return vocab.map(() => 0);
 
-    return vocab.map((term) => {
+    const vector = vocab.map((term) => {
         const tf = tokens.filter((t) => t === term).length / tokens.length;
         if (tf === 0) return 0;
 
         const docsWithTerm = allDocs.filter((d) => d.includes(term)).length;
         const idf = Math.log10(N / (1 + docsWithTerm));
 
-        return tf * idf;
+        // Apply custom weight if provided
+        const weight = tokenWeights?.get(term) ?? 1.0;
+        
+        return tf * idf * weight;
     });
+    
+    // L2 normalization to reduce paragraph length effects
+    if (normalizeVector) {
+        const magnitude = Math.sqrt(vector.reduce((sum, v) => sum + v * v, 0));
+        if (magnitude > 0) {
+            for (let i = 0; i < vector.length; i++) {
+                vector[i] /= magnitude;
+            }
+        }
+    }
+    
+    return vector;
 }
 
 export function calculateDistanceMatrix(vectors: number[][]): number[][] {

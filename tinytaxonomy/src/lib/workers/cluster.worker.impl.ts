@@ -14,6 +14,14 @@ import * as hclustModule from 'ml-hclust';
 import type { WinkMethods } from 'wink-nlp';
 import { calculateTfIdfVector, calculateDistanceMatrix } from '../utils/math';
 import { textRank } from '../utils/nlp';
+import {
+    processDocumentsEnhanced,
+    calculateEnhancedTfIdf,
+    computeDendrogramCutoff,
+    findHeightGaps,
+    filterStopwords,
+    type EnhancedPipelineOptions
+} from '../utils/nlpEnhanced';
 import type { WorkerMessage, WorkerResponse, TaxonomyNode } from '../types';
 
 // --- FIXES FOR CJS IMPORTS (Kept for wink-nlp/model) ---
@@ -40,6 +48,9 @@ declare const self: Worker;
 
 self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
     const { text, mode, options = {} } = e.data;
+    
+    // Check if enhanced pipeline is requested (default: true for new behavior)
+    const useEnhanced = options.enableEnhancedPipeline !== false;
 
     try {
         self.postMessage({ type: 'progress', message: 'Tokenizing and cleaning text...' });
@@ -148,6 +159,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         self.postMessage({ type: 'progress', message: 'Calculating similarity matrix...' });
 
         let matrix: any, labels: string[];
+        let tokenWeightsForLabeling: Map<string, number> | undefined = undefined;
+        
         if (mode === 'word') {
             // Use the previously computed `segments` and `labelsForDisplay` which
             // respect the noun-only and min-frequency filters. Avoid re-tokenizing
@@ -195,7 +208,26 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
             ({ matrix, labels } = calculateWordSimilarityMatrix(segments, contextSegments, labelsToUse));
         } else {
-            ({ matrix, labels } = calculateSegmentSimilarityMatrix(segments));
+            // For paragraph/sentence mode, optionally use enhanced pipeline
+            if (useEnhanced) {
+                self.postMessage({ type: 'progress', message: 'Running enhanced NLP pipeline (lemmatization, n-grams)...' });
+                
+                const enhancedOptions: EnhancedPipelineOptions = {
+                    enableLemmatization: options.enableLemmatization !== false,
+                    enableNgrams: options.enableNgrams !== false,
+                    minNgramFreq: options.minNgramFreq ?? 2,
+                    nounPhraseBoost: options.nounPhraseBoost ?? 1.3,
+                    glueWordPenalty: options.glueWordPenalty ?? 0.5,
+                    normalizeVectors: options.normalizeVectors !== false
+                };
+                
+                ({ matrix, labels, tokenWeightsForLabeling } = calculateEnhancedSegmentSimilarityMatrix(
+                    segments, 
+                    enhancedOptions
+                ));
+            } else {
+                ({ matrix, labels } = calculateSegmentSimilarityMatrix(segments));
+            }
         }
 
         self.postMessage({ type: 'progress', message: 'Running hierarchical clustering...' });
@@ -207,13 +239,57 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
         self.postMessage({ type: 'progress', message: 'Generating taxonomy tree...' });
 
-        const tree = convertToD3(clusterResult, labels);
+        // Apply dendrogram cutoff if enabled
+        let finalTree: TaxonomyNode;
+        if (useEnhanced && options.enableAutoCutoff !== false) {
+            // Collect all merge heights from the clustering result
+            const heights: number[] = [];
+            collectHeights(clusterResult, heights);
+            
+            if (heights.length > 0) {
+                const percentile = options.cutoffPercentile ?? 0.85;
+                const { cutoff, stats } = computeDendrogramCutoff(heights, percentile);
+                
+                // Also look for natural gaps in the height distribution
+                const gaps = findHeightGaps(heights, 1.5);
+                
+                // Use the smaller of: percentile cutoff or first significant gap
+                const effectiveCutoff = gaps.length > 0 
+                    ? Math.min(cutoff, Math.min(...gaps))
+                    : cutoff;
+                
+                self.postMessage({ 
+                    type: 'progress', 
+                    message: `Applying dendrogram cutoff at H=${effectiveCutoff.toFixed(3)} (${(percentile * 100).toFixed(0)}th percentile)...` 
+                });
+                
+                finalTree = convertToD3WithCutoff(clusterResult, labels, effectiveCutoff);
+            } else {
+                finalTree = convertToD3(clusterResult, labels);
+            }
+        } else {
+            finalTree = convertToD3(clusterResult, labels);
+        }
 
-        self.postMessage({ type: 'success', data: tree });
+        self.postMessage({ type: 'success', data: finalTree });
     } catch (err) {
         self.postMessage({ type: 'error', error: err instanceof Error ? err.message : 'Unknown clustering or NLP error' });
     }
 };
+
+/**
+ * Recursively collect all merge heights from a cluster result
+ */
+function collectHeights(node: any, heights: number[]): void {
+    if (node.height !== undefined && node.height !== null) {
+        heights.push(node.height);
+    }
+    if (node.children && node.children.length > 0) {
+        for (const child of node.children) {
+            collectHeights(child, heights);
+        }
+    }
+}
 
 function calculateSegmentSimilarityMatrix(segments: string[]) {
     const tokenizedSegments = segments.map((seg) => {
@@ -231,6 +307,49 @@ function calculateSegmentSimilarityMatrix(segments: string[]) {
     const matrix = calculateDistanceMatrix(vectors);
 
     return { matrix, labels: segments };
+}
+
+/**
+ * Enhanced segment similarity matrix using lemmatization, n-grams, and weighted TF-IDF
+ */
+function calculateEnhancedSegmentSimilarityMatrix(
+    segments: string[], 
+    options: EnhancedPipelineOptions
+): { matrix: number[][], labels: string[], tokenWeightsForLabeling: Map<string, number> } {
+    // Process documents through enhanced pipeline
+    const { 
+        processedDocs, 
+        globalVocabulary, 
+        tokenWeights,
+        ngrams 
+    } = processDocumentsEnhanced(segments, options);
+    
+    // Build tokenized segments from processed vocabulary
+    const tokenizedSegments = processedDocs.map(doc => doc.vocabulary);
+    
+    // Filter vocabulary by document frequency (remove too rare or too common terms)
+    const filteredVocabulary = globalVocabulary.filter(term => {
+        const df = tokenizedSegments.filter(doc => doc.includes(term)).length;
+        const dfRatio = df / tokenizedSegments.length;
+        // Keep terms appearing in at least 1 doc and at most 95% of docs
+        return df >= 1 && dfRatio <= 0.95;
+    });
+    
+    // Calculate TF-IDF vectors with enhanced weighting
+    const vectors = tokenizedSegments.map(segTokens => 
+        calculateTfIdfVector(segTokens, tokenizedSegments, filteredVocabulary, {
+            tokenWeights,
+            normalizeVector: options.normalizeVectors !== false
+        })
+    );
+    
+    const matrix = calculateDistanceMatrix(vectors);
+    
+    return { 
+        matrix, 
+        labels: segments,
+        tokenWeightsForLabeling: tokenWeights
+    };
 }
 
 function calculateWordSimilarityMatrix(words: string[], contexts: string[], labelsForDisplay?: string[]) {
@@ -393,6 +512,56 @@ function convertToD3(node: any, labels: string[]): TaxonomyNode {
     }
 
     return { name: '[Malformed Node]', fullText: 'Node structure missing index and children.', value: 1, type: 'leaf' };
+}
+
+/**
+ * Convert clustering result to D3 tree with dendrogram cutoff.
+ * Nodes above the cutoff height become top-level clusters (multiple roots).
+ * This produces a cleaner, more interpretable taxonomy.
+ */
+function convertToD3WithCutoff(node: any, labels: string[], cutoffHeight: number): TaxonomyNode {
+    // Helper to collect all subtrees at or below the cutoff
+    function collectSubtreesAtCutoff(n: any, subtrees: any[]): void {
+        const nodeHeight = n.height ?? n.distance ?? n.dist ?? 0;
+        
+        // If this node is at or below cutoff, it becomes a subtree root
+        if (nodeHeight <= cutoffHeight) {
+            subtrees.push(n);
+            return;
+        }
+        
+        // Otherwise, recurse into children
+        if (n.children && n.children.length > 0) {
+            for (const child of n.children) {
+                collectSubtreesAtCutoff(child, subtrees);
+            }
+        } else {
+            // Leaf node above cutoff (shouldn't happen normally)
+            subtrees.push(n);
+        }
+    }
+    
+    const subtrees: any[] = [];
+    collectSubtreesAtCutoff(node, subtrees);
+    
+    // If we have multiple subtrees, create a synthetic root
+    if (subtrees.length > 1) {
+        const convertedSubtrees = subtrees.map(st => convertToD3(st, labels));
+        
+        return {
+            id: nextWorkerNodeId(),
+            name: `Root (${subtrees.length} top-level clusters)`,
+            height: cutoffHeight,
+            sampleLeaves: convertedSubtrees.flatMap(st => st.sampleLeaves ?? []).slice(0, 5),
+            clusterKeywords: [],
+            clusterLabel: `${subtrees.length} clusters at cutoff H=${cutoffHeight.toFixed(3)}`,
+            children: convertedSubtrees,
+            type: 'cluster'
+        };
+    }
+    
+    // Single subtree or original tree
+    return convertToD3(node, labels);
 }
 
 // --- END: worker implementation ---

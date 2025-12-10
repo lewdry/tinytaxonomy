@@ -10,7 +10,7 @@ Highlights
 ## Tech stack
 - Framework: SvelteKit
 - Styling: Tailwind CSS
-- NLP: wink-nlp (lightweight browser-friendly models)
+- NLP: wink-nlp (lightweight browser-friendly models) + compromise.js (lemmatization & noun phrases)
 - Math / Clustering: ml-hclust (+ supporting matrix utilities)
 - Visualization: D3 (hierarchies / dendrograms)
 - Worker model: Web Workers to perform expensive calculations off the main thread
@@ -50,8 +50,18 @@ The worker also accepts an optional `options` object in its message (useful for 
 // noun-only + min frequency (word mode)
 worker.postMessage({ text, mode: 'word', options: { nounOnly: true, minWordFreq: 2 } });
 
-// future: minTfIdf for sentence/paragraph filtering (placeholder)
-worker.postMessage({ text, mode: 'sentence', options: { minTfIdf: 0.12 } });
+// enhanced pipeline options (paragraph/sentence modes)
+worker.postMessage({ text, mode: 'paragraph', options: {
+  enableEnhancedPipeline: true,   // Use enhanced NLP (default: true)
+  enableLemmatization: true,       // "idioms" → "idiom", "analyses" → "analysis"
+  enableNgrams: true,              // Detect bigrams/trigrams like "semantic_analysis"
+  minNgramFreq: 2,                 // Min occurrences to keep an n-gram
+  nounPhraseBoost: 1.3,            // Weight boost for noun phrases
+  glueWordPenalty: 0.5,            // Penalty for over-connecting words
+  normalizeVectors: true,          // L2 normalize TF-IDF vectors
+  enableAutoCutoff: true,          // Auto-cut dendrogram at natural boundaries
+  cutoffPercentile: 0.85           // Percentile for dendrogram cutoff
+}});
 ```
 Step 1: Segmentation & Cleaning
 Use wink-nlp to parse the doc.
@@ -60,14 +70,25 @@ If Mode = Paragraph: Split by \n\n.
 If Mode = Sentence: Use doc.sentences().out().
 If Mode = Word: Use doc.sentences().out() (we still need sentences to establish context for word similarity).
 Cleaning: Remove stop-words, punctuation, and apply stemming (Snowball stemmer recommended).
+
+Step 1.5: Enhanced NLP Pipeline (Optional, enabled by default)
+The enhanced pipeline applies additional preprocessing for better semantic grouping:
+
+- **Lemmatization** (via compromise.js): Reduces words to their base form — `"idioms"→"idiom"`, `"analyses"→"analysis"`, `"hierarchical"→"hierarchy"`. This pulls related word forms together.
+- **N-gram detection**: Identifies significant multi-word phrases (bigrams/trigrams) that appear ≥2 times across the text. For example, `"semantic analysis"` becomes a single token `"semantic_analysis"` instead of two separate words.
+- **Noun phrase extraction**: Detects noun phrases like `"hierarchical clustering"` and boosts their weight (default 1.3×).
+- **Glue word penalty**: Reduces the influence of over-connecting words like `"process"`, `"level"`, `"relationship"`, `"structure"` (default 0.5× penalty).
+
 Step 2: Vectorization (TF-IDF)
 Convert segments into numerical vectors.
 
-Build a Vocabulary: List of all unique stemmed words.
+Build a Vocabulary: List of all unique stemmed/lemmatized words (plus detected n-grams).
 Build the Term-Document Matrix:
 Rows = Segments.
 Cols = Unique Words.
-Values = TF-IDF Score.
+Values = TF-IDF Score (optionally weighted by noun phrase boost / glue word penalty).
+
+**Vector Normalization** (optional, enabled by default): L2 normalize each vector to unit length. This prevents long paragraphs from dominating the similarity calculations purely due to their length.
 Step 3: The "Matrix Logic" (The Toggle Implementation)
 Paragraph/Sentence Mode: Use the matrix as is. We are comparing Rows (Segments) against each other.
 Word Mode: Transpose the matrix. Rows become Words, Cols become Segments. We are comparing Words based on the contexts (segments) they appear in.
@@ -92,6 +113,15 @@ JSON
 { "name": "Leaf Node (The Sentence or Word)", "value": 1 }
 ]
 }
+
+Step 6.5: Dendrogram Cutoff (Optional, enabled by default)
+Instead of forcing a single root that merges all clusters at arbitrarily high distances:
+
+- **Compute the merge height distribution** across all internal nodes
+- **Auto-select a cutoff** at the 85th percentile (configurable) or at the first significant "gap" in the height distribution
+- **Produce multiple top-level clusters** when nodes above the cutoff would otherwise weakly connect unrelated branches
+
+This gives a cleaner, more interpretable taxonomy where unrelated concepts remain separate instead of being artificially merged.
 ## Implementation details (high level)
 
 The main pipeline implemented in a worker is:
@@ -115,6 +145,21 @@ The app now includes the following quality-of-life and readability improvements 
 - Distance indicators: internal nodes show a small horizontal bar that visualizes merge distance (H) and links vary slightly in stroke width by merge strength.
 - Radial layout: a radial dendrogram option (Layout dropdown) lets you arrange the taxonomy in rings from the root → leaves, which reduces cross-overs and better preserves semantic grouping.
 - Noise reduction controls: the UI exposes a "noun-only" toggle and a minimum token frequency filter in word mode so stopwords, function words and rare tokens can be hidden before clustering.
+
+### Enhanced NLP Pipeline
+
+The app includes an upgraded NLP pipeline (enabled by default) that significantly improves clustering quality:
+
+| Feature | What it does | Why it helps |
+|---------|--------------|--------------|
+| **Lemmatization** | `"idioms"→"idiom"`, `"analyses"→"analysis"` | Related word forms cluster together |
+| **N-gram detection** | `"semantic analysis"` → `"semantic_analysis"` | Multi-word concepts treated as single units |
+| **Noun phrase boost** | Weight × 1.3 for detected noun phrases | Important concepts get higher influence |
+| **Glue word penalty** | Weight × 0.5 for generic words (`process`, `level`, etc.) | Reduces spurious connections |
+| **Vector normalization** | L2 normalize TF-IDF vectors | Long paragraphs don't dominate |
+| **Dendrogram cutoff** | Auto-cut at 85th percentile or first gap | Cleaner multi-root taxonomy |
+
+The enhanced pipeline uses [compromise.js](https://github.com/spencermountain/compromise) for lightweight client-side lemmatization and noun phrase extraction.
 
 Default behavior and input limits
 - The default Min Token Frequency in the UI is now 1 (so very-low-frequency tokens are kept by default). You can raise this to remove noise during word-mode clustering.
@@ -227,6 +272,9 @@ Tips
 - Keep heavy processing out of the main thread (use a Worker)
 - Add small sample text inputs for reproducible testing
 ## Where to look next
-- Worker: `src/lib/workers/cluster.worker.ts`
+- Worker: `src/lib/workers/cluster.worker.ts` (main worker entry)
+- Worker implementation: `src/lib/workers/cluster.worker.impl.ts` (clustering logic)
+- Enhanced NLP utilities: `src/lib/utils/nlpEnhanced.ts` (lemmatization, n-grams, weighting)
+- Math utilities: `src/lib/utils/math.ts` (TF-IDF, distance matrix, vector normalization)
 - Main visualization component: `src/lib/components/TaxonomyTree.svelte`
 - App state: `src/lib/stores/appState.ts`

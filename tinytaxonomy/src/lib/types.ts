@@ -5,6 +5,17 @@ export interface WorkerOptions {
     minWordFreq?: number;
     minTfIdf?: number;
     customStopwords?: string[];
+    
+    // Enhanced NLP pipeline options
+    enableEnhancedPipeline?: boolean;   // Use the new enhanced pipeline
+    enableLemmatization?: boolean;       // Lemmatize tokens (idioms→idiom)
+    enableNgrams?: boolean;              // Detect bigrams/trigrams
+    minNgramFreq?: number;               // Min occurrences for ngrams (default: 2)
+    nounPhraseBoost?: number;            // Weight boost for noun phrases (default: 1.3)
+    glueWordPenalty?: number;            // Penalty for glue words (default: 0.5)
+    normalizeVectors?: boolean;          // L2 normalize TF-IDF vectors
+    enableAutoCutoff?: boolean;          // Auto-cut dendrogram at natural boundaries
+    cutoffPercentile?: number;           // Percentile for dendrogram cutoff (default: 0.85)
 }
 
 export interface WorkerMessage {
